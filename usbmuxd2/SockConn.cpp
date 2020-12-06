@@ -22,6 +22,9 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <netdb.h>
+#include <system_error>
+
 
 SockConn::SockConn(std::string ipaddr, uint16_t dPort, Client *cli) 
 : _ipaddr(ipaddr), _cli(cli), _dPort(dPort), _killInProcess(false), _didConnect(false), _cfd(-1), _dfd(-1), _pfds(NULL)
@@ -50,13 +53,25 @@ void SockConn::connect(){
     });
 	int err = 0;
 	struct sockaddr_in devaddr = {};
-    struct msghdr fdmsg = {};
-    struct cmsghdr cfdmsg = {};
 
 	retassure((_dfd = socket(AF_INET, SOCK_STREAM, 0))>0, "failed to create socket");
 
 	devaddr.sin_family = AF_INET;
-	devaddr.sin_addr.s_addr = inet_addr(_ipaddr.c_str());
+    if ((devaddr.sin_addr.s_addr = inet_addr(_ipaddr.c_str())) == (in_addr_t)-1){
+        struct hostent *he = NULL;
+        struct in_addr **addr_list = NULL;
+        assure(he = gethostbyname(_ipaddr.c_str()));
+        
+        addr_list = (struct in_addr **)he->h_addr_list;
+        for (int i=0; addr_list[i] != NULL; i++) {
+            _ipaddr = inet_ntoa(*addr_list[i]);
+            if ((devaddr.sin_addr.s_addr = inet_addr(_ipaddr.c_str())) != (in_addr_t)-1) {
+                break;
+            }
+        }
+        if (devaddr.sin_addr.s_addr == (in_addr_t)-1)
+            reterror("failed to resolve to ip address");
+    }
 	devaddr.sin_port = htons(_dPort);
 
 	retassure(!(err = ::connect(_dfd, (sockaddr*)&devaddr, sizeof(devaddr))), "failed to connect to device on port=%d with err=%d errno=%d(%s)",_dPort,err,errno,strerror(errno));
@@ -81,6 +96,7 @@ void SockConn::connect(){
 void SockConn::kill() noexcept{
     //sets _killInProcess to true and executes if statement if it was false before
     if (!_killInProcess.exchange(true)) {
+        
         std::thread delthread([this](){
 #ifdef DEBUG
             debug("killing SockConn (%p) C=%d D=%d",this,_cfd,_dfd);
@@ -90,6 +106,7 @@ void SockConn::kill() noexcept{
             delete this;
         });
         delthread.detach();
+        
     }
 }
 

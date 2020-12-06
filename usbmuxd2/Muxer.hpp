@@ -13,9 +13,9 @@
 #include <vector>
 #include <lck_container.h>
 #include <plist/plist.h>
-#include <plist/plist++.h>
 #include <set>
 #include <Device.hpp>
+#include <Event.hpp>
 
 class Client;
 class ClientManager;
@@ -31,7 +31,7 @@ class Muxer {
     int _newid;
     bool _isDying;
     std::atomic<int> _refcnt;
-    std::mutex _reflock;
+    Event _refevent;
 
     Device *get_device_by_id(int id);
     
@@ -76,8 +76,8 @@ public:
     void notify_alldevices(Client *cli) noexcept;
     
     //---- Static ----
-    static PList::Dictionary getDevicePlist(Device *dev) noexcept;
-    static PList::Dictionary getClientPlist(Client *client) noexcept;
+    static plist_t getDevicePlist(Device *dev) noexcept;
+    static plist_t getClientPlist(Client *client) noexcept;
 };
 
 

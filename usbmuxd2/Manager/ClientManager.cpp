@@ -7,7 +7,6 @@
 //
 
 #include "ClientManager.hpp"
-#include "log.h"
 #include <libgeneral/macros.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -71,7 +70,7 @@ void ClientManager::stopAction() noexcept{
     sAddr.sun_family = AF_UNIX;
     strncpy(sAddr.sun_path, socket_path, sizeof(sAddr.sun_path));
     debug("connecting for stopAction");
-    connect(mfd, (struct sockaddr*)&sAddr, sizeof(sAddr.sun_family)+strlen(sAddr.sun_path));
+    connect(mfd, (struct sockaddr*)&sAddr, (socklen_t)(sizeof(sAddr.sun_family)+strlen(sAddr.sun_path)));
 
 error:
     if (mfd > 0){

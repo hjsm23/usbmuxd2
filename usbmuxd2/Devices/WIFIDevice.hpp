@@ -21,14 +21,12 @@ class WIFIDevice : public Device, Manager {
     std::string _ipaddr;
     std::string _serviceName;
     heartbeat_client_t _hbclient;
-    plist_t _hbeat;
 	plist_t _hbrsp;
 	idevice_t _idev;
 
-
-
     virtual ~WIFIDevice() override;
     virtual void loopEvent() override;
+    virtual void beforeLoop() override;
     virtual void afterLoop() noexcept override;
 
 public:

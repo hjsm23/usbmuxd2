@@ -8,7 +8,6 @@
 
 #include "preflight.hpp"
 
-#include "log.h"
 #include <libgeneral/macros.h>
 #include <Device.hpp>
 #include <sysconf/sysconf.hpp>
@@ -17,7 +16,8 @@
 #include <unistd.h>
 #include <future>
 #include <plist/plist.h>
-#include <plist/plist++.h>
+#include <system_error>
+
 
 
 #ifdef HAVE_LIBIMOBILEDEVICE
@@ -25,10 +25,6 @@
 #include <libimobiledevice/heartbeat.h>
 #include <libimobiledevice/lockdown.h>
 #include <libimobiledevice/notification_proxy.h>
-
-// enum connection_type {
-//     CONNECTION_USBMUXD = 1
-// };
 
 struct idevice_private {
     char *udid;
@@ -69,6 +65,7 @@ error:
     if (lockdown)
         lockdownd_client_free(lockdown);
     if (cb_data) {
+        
         std::thread delthread([](np_cb_data *cb_data){
             debug("deleing pairing_callback cb_data(%p)",cb_data);
             if (cb_data->np){ //this needs to be set!
@@ -81,6 +78,7 @@ error:
             safeFree(cb_data);
         },cb_data);
         delthread.detach();
+        
     }
 }
 
@@ -92,7 +90,7 @@ void preflight_device(const char *serial, int id){
     idevice_t dev = nullptr;
     lockdownd_client_t lockdown = NULL;
     char *lockdowntype = NULL;
-    PList::Dictionary *pairingRecord = nullptr;
+    plist_t p_pairingRecord = NULL;
     plist_t pProdVers = NULL;
     char *version_str = NULL;
     lockdownd_service_descriptor_t service = NULL;
@@ -109,9 +107,7 @@ void preflight_device(const char *serial, int id){
             lockdownd_client_free(lockdown);
         safeFree(lockdowntype);
         safeFree(version_str);
-        if (pairingRecord) {
-            delete pairingRecord;
-        }
+        safeFreeCustom(p_pairingRecord, plist_free);
         if (service) {
             lockdownd_service_descriptor_free(service);
         }
@@ -144,17 +140,23 @@ void preflight_device(const char *serial, int id){
     }
     
     try {
-        pairingRecord = dynamic_cast<PList::Dictionary*>(sysconf_get_device_record(serial));
+        p_pairingRecord = sysconf_get_device_record(serial);
     } catch (tihmstar::exception &e) {
         info("No pairing record loaded for device %s",serial);
         goto pairing_required;
     }
     
     {
-        PList::String *pHostId = nullptr;
-        assure(pHostId = dynamic_cast<PList::String *>((*pairingRecord)["HostID"]));
-        host_id = pHostId->GetValue();
+        const char *str = NULL;
+        uint64_t strlen = 0;
+        plist_t p_hostid = NULL;
+        
+        retassure(p_hostid = plist_dict_get_item(p_pairingRecord, "HostID"), "Failed to get HostID from pairing record");
+        
+        retassure(str = plist_get_string_ptr(p_hostid, &strlen), "Failed to get str ptr from HostID");
+        host_id = std::string(str,strlen);
     }
+    
     if (!(lret = lockdownd_start_session(lockdown, host_id.c_str(), NULL, NULL))){
         info("%s: Finished preflight on device %s", __func__, serial);
         return;

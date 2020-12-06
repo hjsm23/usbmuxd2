@@ -9,7 +9,9 @@
 #include "Manager.hpp"
 #include <libgeneral/macros.h>
 #include <libgeneral/exception.hpp>
-#include "log.h"
+#include <unistd.h>
+#include <system_error>
+
 
 Manager::Manager()
 : _loopThread(nullptr),_loopState(LOOP_UNINITIALISED)
@@ -19,19 +21,22 @@ Manager::Manager()
 
 
 Manager::~Manager(){
-    debug("[destroying] Manager(%p)",this);
+    debug("[Manager] destroying Manager(%p)",this);
 
     stopLoop();
+#ifdef DEBUG
     assert(_loopState == LOOP_UNINITIALISED || _loopState == LOOP_STOPPED);
+    assert(!_loopThread);
+#endif
 }
 
 void Manager::loopEvent(){
-    reterror("LoopEvent wasn't overwritten. Probably subclass construction failed!");
+    reterror("[Manager] LoopEvent wasn't overwritten. Probably subclass construction failed!");
 }
 
 
 void Manager::startLoop(){
-    retassure(_loopState == LOOP_UNINITIALISED, "loop already initialized");
+    retassure(_loopState == LOOP_UNINITIALISED, "[Manager] loop already initialized");
     cleanup([&]{
         _sleepy.unlock();
     });
@@ -43,21 +48,28 @@ void Manager::startLoop(){
     assure(_loopState.compare_exchange_strong(expected, tobeplaced));    
     assure(!_loopThread);
 
+    
     _loopThread = new std::thread([&]{
         _loopState = LOOP_RUNNING;
         _sleepy.unlock();
+        try {
+            beforeLoop();
+        } catch (tihmstar::exception &e) {
+            debug("failed to execute beforeLoop action of exception error=%s code=%d",e.what(),e.code());
+            _loopState = LOOP_STOPPING;
+        }
         while (_loopState == LOOP_RUNNING) {
             try {
                 loopEvent();
             } catch (tihmstar::exception &e) {
-                debug("breaking Manager-Loop because of exception error=%s code=%d",e.what(),e.code());
+                debug("[Manager] breaking Manager-Loop because of exception error=%s code=%d",e.what(),e.code());
                 break;
             }
         }
         afterLoop();
         _loopState = LOOP_STOPPED;
     });
-    
+
     //hangs here iff _loopThread didn't spawn yet
     _sleepy.lock();
     assure(_loopState == LOOP_RUNNING); //sanity check
@@ -88,6 +100,8 @@ void Manager::stopLoop() noexcept{
         _loopState.compare_exchange_strong(expected, tobeplaced);
         
         stopAction();
+    }
+    if (_loopThread) {
         try {
             _loopThread->join();
         } catch (...) {
@@ -95,6 +109,10 @@ void Manager::stopLoop() noexcept{
         }
         delete _loopThread; _loopThread = nullptr;
     }
+}
+
+void Manager::beforeLoop(){
+    //do nothing by default
 }
 
 void Manager::afterLoop() noexcept{

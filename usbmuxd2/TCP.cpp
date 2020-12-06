@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <string.h>
 #include <poll.h>
+#include <system_error>
 
 
 #define MIN(a,b) (((a)<(b)) ? (a) : (b))
@@ -54,10 +55,11 @@ TCP::~TCP() {
         //
     }
 
+#warning UAF: device might be dead by now
+#warning TODO: add reference counting to Device
     _device->close_connection(_sPort);
     _connState = CONN_DYING;
-    _lockCanSend.unlock();
-    _lockCanSend.unlock();
+    _lockCanSend.notifyAll();
     stopLoop();
 
     while (!_didConnect || _refCnt) { //connect is always called right away, let's wait until we did
@@ -188,14 +190,11 @@ retry:
 
         // **** Put this thread to sleep until we can send more data **** //
 
-        //if lock is set, this will do nothing
-        //else this will make sure the next call to lock will be blocking.
-        _lockCanSend.try_lock(); //never "blocking"
 
         _lockStx.unlock(); //unlocking _lockStx inbetween _lockCanSend locks, makes sure we never lock if we could send data!
 
         assure(_connState == CONN_CONNECTED);
-        _lockCanSend.lock(); //this lock will always be "blocking", unless we can send more data
+        _lockCanSend.wait();//this lock will always be "blocking", unless we can send more data
 
         goto retry;
     }
@@ -306,7 +305,7 @@ void TCP::handle_input(tcphdr* tcp_header, uint8_t* payload, uint32_t payload_le
                 _stx.seqAcked = rAck; //update ACK on sent packets
                 _stx.inWin = ntohs(tcp_header->th_win) << 8;
 
-                _lockCanSend.unlock(); //notify threads that we can send more data now
+                _lockCanSend.notifyAll();
 
                 _lockStx.unlock();
             }else {
@@ -347,6 +346,7 @@ void TCP::handle_input(tcphdr* tcp_header, uint8_t* payload, uint32_t payload_le
 void TCP::kill() noexcept{
     //sets _killInProcess to true and executes if statement if it was false before
     if (!_killInProcess.exchange(true)) {
+        
         std::thread delthread([this](){
 #ifdef DEBUG
             debug("killing TCP (%p) %d",this,_pfds[0].fd);
@@ -356,6 +356,8 @@ void TCP::kill() noexcept{
             delete this;
         });
         delthread.detach();
+        
+
     }
 }
 

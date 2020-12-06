@@ -7,7 +7,6 @@
 //
 
 #include <iostream>
-#include "log.h"
 #include <libgeneral/macros.h>
 #include "Muxer.hpp"
 #include <future>
@@ -24,6 +23,11 @@
 #include <grp.h>
 #include <stdio.h>
 
+extern "C"{
+#ifdef HAVE_LIBIMOBILEDEVICE
+#include <libimobiledevice/libimobiledevice.h>
+#endif
+};
 
 #undef error //errors will be printed as fatal for this file
 #define error(a ...) usbmuxd_log(LL_FATAL,a)
@@ -94,7 +98,7 @@ static void set_signal_handlers(void){
  */
 static int daemonize(void) noexcept{
     int err = 0;
-    int res = 0;
+    ssize_t res = 0;
     pid_t pid = 0;
     pid_t sid = 0;
     int pfd[2] = {};
@@ -174,6 +178,7 @@ static void usage(){
     printf("  -l, --logfile=LOGFILE\tLog (append) to LOGFILE instead of stderr or syslog.\n");
     printf("      --nowifi\t do not start WIFIDeviceManager\n");
     printf("      --nousb\t do not start USBDeviceManager\n");
+    printf("      --debug\t enable debug logging\n");
     printf("\n");
 }
 
@@ -195,6 +200,7 @@ static void parse_opts(int argc, const char **argv){
         {"user", required_argument, NULL, 'U'},
         {"nowifi", optional_argument, NULL, '0'},
         {"nousb", optional_argument, NULL, '1'},
+        {"debug", no_argument, NULL, 2},
         {NULL, 0, NULL, 0}
     };
     int c;
@@ -222,7 +228,7 @@ static void parse_opts(int argc, const char **argv){
             ++verbose;
             break;
         case 'V':
-            printf("%s\n", PACKAGE_STRING);
+            printf("%s\n", VERSION_STRING);
             exit(0);
         case 'U':
             gConfig->dropUser = optarg;
@@ -266,6 +272,9 @@ static void parse_opts(int argc, const char **argv){
                 gConfig->useLogfile = 1;
             }
             break;
+        case 2: //debug
+                gConfig->debugLevel++;
+                break;
         default:
             usage();
             exit(2);
@@ -279,6 +288,7 @@ int main(int argc, const char * argv[]) {
     int lfd = -1;
     struct flock lock = {};
 
+    
     info("starting %s", VERSION_STRING);
     cassure(!pthread_mutex_init(&mlck, NULL));
     cassure(!pthread_mutex_lock(&mlck));
@@ -294,6 +304,13 @@ int main(int argc, const char * argv[]) {
 
     parse_opts(argc,argv);
 
+    if (gConfig->debugLevel) {
+        info("debuglevel set to %d",gConfig->debugLevel);
+#ifdef HAVE_LIBIMOBILEDEVICE
+        idevice_set_debug_level(gConfig->debugLevel);
+#endif
+    }
+    
     if (gConfig->daemonize && !gConfig->useLogfile) {
         verbose += LL_INFO;
         debug("enabling syslog");
@@ -328,7 +345,7 @@ int main(int argc, const char * argv[]) {
     if (lock.l_type != F_UNLCK) {
         cretassure(exit_signal,"Another instance is already running (pid %d). exiting.", lock.l_pid);
 
-        cretassure(lock.l_pid && !kill(lock.l_pid, 0),"Could not determine pid of the other running instance!");
+        cretassure(lock.l_pid,"Could not determine pid of the other running instance!");
 
         notice("Sending signal %d to instance with pid %d", exit_signal, lock.l_pid);
         cretassure(!kill(lock.l_pid, exit_signal),"Could not deliver signal %d to pid %d", exit_signal, lock.l_pid);

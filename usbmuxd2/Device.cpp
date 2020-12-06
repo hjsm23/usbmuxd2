@@ -7,10 +7,11 @@
 //
 
 #include "Device.hpp"
-#include "log.h"
 #include <libgeneral/macros.h>
 #include <algorithm>
 #include <thread>
+#include <unistd.h>
+#include <system_error>
 
 Device::Device(Muxer *mux, mux_conn_type conntype)
     : _muxer(mux), _conntype(conntype), _killInProcess(false), _id(0), _serial{}
@@ -30,6 +31,7 @@ Device::~Device(){
 void Device::kill() noexcept{
     //sets _killInProcess to true and executes if statement if it was false before
     if (!_killInProcess.exchange(true)){
+    
         std::thread delthread([this](){
 #ifdef DEBUG
             debug("killing device (%p) %s",this,_serial);
@@ -39,5 +41,6 @@ void Device::kill() noexcept{
             delete this;
         });
         delthread.detach();
+        
     }
 }
