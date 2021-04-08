@@ -29,7 +29,7 @@ case $host_os in
         have_mdns="yes"
         ;;
   *)
-        LDFLAGS+=" -lstdc++fs"
+        LDFLAGS+=" -lstdc++fs -latomic"
         ;;
 esac
 
